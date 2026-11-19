@@ -1,0 +1,59 @@
+import os
+import xml.etree.ElementTree as ET
+
+xml_dir = r"F:\人工智能相关备份\训练集2\黑烟标记2500"
+target_img_size = 640  # YOLO 训练尺寸
+
+# 模拟统计变量
+original_small = 0
+mosaic_small = 0
+total_objects = 0
+
+for filename in os.listdir(xml_dir):
+    if not filename.endswith(".xml"):
+        continue
+    try:
+        tree = ET.parse(os.path.join(xml_dir, filename))
+        root = tree.getroot()
+        
+        w_orig = float(root.find("size/width").text)
+        h_orig = float(root.find("size/height").text)
+        
+        # 1. 基础 640 缩放比例
+        base_scale = target_img_size / max(w_orig, h_orig)
+        
+        # 2. Mosaic 拼接缩放因子：取平均缩放区间 0.5（相当于把图片尺寸再压小一半，面积缩小到 1/4）
+        mosaic_scale = base_scale * 0.5 
+
+        for obj in root.findall("object"):
+            bndbox = obj.find("bndbox")
+            xmin = float(bndbox.find("xmin").text)
+            ymin = float(bndbox.find("ymin").text)
+            xmax = float(bndbox.find("xmax").text)
+            ymax = float(bndbox.find("ymax").text)
+
+            w_raw = xmax - xmin
+            h_raw = ymax - ymin
+
+            # 原始标准下的面积 (未缩放)
+            area_orig = w_raw * h_raw
+            if area_orig < 1024:
+                original_small += 1
+
+            # Mosaic 4图拼接模拟后的实际像素面积
+            w_mosaic = w_raw * mosaic_scale
+            h_mosaic = h_raw * mosaic_scale
+            area_mosaic = w_mosaic * h_mosaic
+
+            if area_mosaic < 1024:
+                mosaic_small += 1
+
+            total_objects += 1
+
+    except Exception:
+        pass
+
+print("=== YOLO Mosaic 数据增强小目标模拟统计结果 ===")
+print(f"扫描到的总目标数: {total_objects}")
+print(f"原图未缩放时小目标数量 (<32x32): {original_small} (占比: {original_small/total_objects*100:.2f}%)")
+print(f"开启 Mosaic 增强后，训练时实际生成的小目标数: {mosaic_small} (占比: {mosaic_small/total_objects*100:.2f}%)")

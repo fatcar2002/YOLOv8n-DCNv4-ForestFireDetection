@@ -1,0 +1,10 @@
+# 数据集根路径（使用你截图里的真实路径）
+path: F:/ultralyticsyolo8/datasets/forest_fire
+
+train: train/images  # 训练集图片路径 (相对于 path)
+val: val/images      # 验证集图片路径 (相对于 path)
+
+# 类别映射 (原来 1->0: 火险, 2->1: 烟雾)
+names:
+  0: fire
+  1: smoke

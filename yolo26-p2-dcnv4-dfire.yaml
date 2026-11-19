@@ -1,0 +1,46 @@
+# Ultralytics YOLO26-P2-DCNv4 Architecture for D-Fire Micro-Target Detection (Fixed Channel Align)
+nc: 2 # D-Fire 数据集类别数 (smoke, fire)
+scales:
+  n: [0.50, 0.25, 1024] # YOLO26n 规模
+
+# 1. Backbone
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4 (P2 浅层高分辨率特征)
+  - [-1, 2, C3k2, [128, False, 0.25]] # 2
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 2, C3k2, [256, False, 0.25]] # 4
+  - [-1, 1, DCNv4_2D, [512, 3, 2]] # 5-P4/16 (DCNv4 形变下采样)
+  - [-1, 2, C3k2, [512, True]] # 6
+  - [-1, 1, Conv, [512, 3, 2]] # 7-P5/32
+  - [-1, 2, C3k2, [512, True]] # 8
+  - [-1, 1, C2PSA, [512]] # 9-C2PSA 全局空间注意力机制
+
+# 2. Head (引入 P2 浅层解耦 Head，组成 P2, P3, P4, P5 4个输出分支)
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 10
+  - [[-1, 6], 1, Concat, [1]] # 11 cat backbone P4 (512+512=1024)
+  - [-1, 2, C3k2, [512, False]] # 12
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 13
+  - [[-1, 4], 1, Concat, [1]] # 14 cat backbone P3 (512+256=768 -> 自动映射)
+  - [-1, 2, C3k2, [256, False]] # 15 (P3/8 特征)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 16 (继续上采样至 1/4 特征图)
+  - [[-1, 2], 1, Concat, [1]] # 17 cat backbone P2 (256+128=384)
+  - [-1, 2, C3k2, [128, False]] # 18 (P2/4-small 浅层特化分支)
+
+  - [-1, 1, Conv, [128, 3, 2]] # 19
+  - [[-1, 15], 1, Concat, [1]] # 20 cat head P3
+  - [-1, 2, C3k2, [256, False]] # 21 (P3/8-medium)
+
+  - [-1, 1, Conv, [256, 3, 2]] # 22
+  - [[-1, 12], 1, Concat, [1]] # 23 cat head P4
+  - [-1, 2, C3k2, [512, False]] # 24 (P4/16-large)
+
+  - [-1, 1, Conv, [512, 3, 2]] # 25
+  - [[-1, 9], 1, Concat, [1]] # 26 cat head P5
+  - [-1, 2, C3k2, [512, True]] # 27 (P5/32-extra large)
+
+  - [[18, 21, 24, 27], 1, Detect, [nc]] # Detect(P2, P3, P4, P5) 4 头极小目标解耦 Head

@@ -1,0 +1,113 @@
+import os
+import cv2
+
+image_root = r"F:\ultralyticsyolo8\dataset_stage1_ohid\images"
+label_root = r"F:\ultralyticsyolo8\dataset_stage1_ohid\labels"
+target_size = 640
+
+# 1. 预先遍历建立全局图像索引库
+image_dict = {}
+for root, dirs, files in os.walk(image_root):
+    for f in files:
+        ext = os.path.splitext(f)[1].lower()
+        if ext in [".jpg", ".png", ".jpeg", ".bmp"]:
+            base_name = os.path.splitext(f)[0]
+            image_dict[base_name] = os.path.join(root, f)
+
+# 初始化各集合的统计字典 (train, val, test/text, 以及未识别的分类)
+splits = ["train", "val", "test", "text", "other"]
+stats = {
+    s: {"txt_count": 0, "total": 0, "small": 0, "medium": 0, "large": 0} 
+    for s in splits
+}
+
+missing_img_count = 0
+
+# 2. 递归遍历 labels 文件夹
+for root, dirs, files in os.walk(label_root):
+    # 根据当前路径判断属于哪个 split (train / val / test / text)
+    path_lower = root.lower().replace("\\", "/")
+    current_split = "other"
+    for s in ["train", "val", "test", "text"]:
+        if f"/{s}" in path_lower or f"_{s}" in path_lower or path_lower.endswith(f"/{s}"):
+            current_split = s
+            break
+
+    for f in files:
+        if not f.endswith(".txt"):
+            continue
+
+        base_name = os.path.splitext(f)[0]
+        label_path = os.path.join(root, f)
+
+        # 匹配图片
+        if base_name not in image_dict:
+            missing_img_count += 1
+            continue
+
+        img_path = image_dict[base_name]
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+        orig_h, orig_w = img.shape[:2]
+
+        # 640 Letterbox 等比例缩放比例
+        scale = target_size / max(orig_w, orig_h)
+
+        stats[current_split]["txt_count"] += 1
+
+        with open(label_path, "r", encoding="utf-8") as file:
+            lines = file.readlines()
+
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) < 5:
+                continue
+
+            w_norm = float(parts[3])
+            h_norm = float(parts[4])
+
+            # 还原并计算 640x640 下的真实像素面积
+            w_px_640 = (w_norm * orig_w) * scale
+            h_px_640 = (h_norm * orig_h) * scale
+            area_640 = w_px_640 * h_px_640
+
+            stats[current_split]["total"] += 1
+
+            if area_640 < 1024:
+                stats[current_split]["small"] += 1
+            elif area_640 < 9216:
+                stats[current_split]["medium"] += 1
+            else:
+                stats[current_split]["large"] += 1
+
+# 3. 打印分数据集汇总报告
+print("=" * 65)
+print(f"=== YOLO 数据集分集 (Split) 640x640 目标尺寸统计报告 ===")
+print("=" * 65)
+
+total_all_objects = 0
+
+for s, data in stats.items():
+    if data["txt_count"] == 0:
+        continue
+    
+    total = data["total"]
+    total_all_objects += total
+    print(f"\n【 数据集划分级别: {s.upper()} 】")
+    print(f"  包含 TXT 标签文件数 : {data['txt_count']}")
+    print(f"  标注目标总数量     : {total}")
+    
+    if total > 0:
+        s_cnt = data["small"]
+        m_cnt = data["medium"]
+        l_cnt = data["large"]
+        print(f"  ├─ 小目标 (<32x32 = 1024 px)  : {s_cnt:6d} 个 ({s_cnt / total * 100:.2f}%)")
+        print(f"  ├─ 中目标 (32x32 ~ 96x96)     : {m_cnt:6d} 个 ({m_cnt / total * 100:.2f}%)")
+        print(f"  └─ 大目标 (>=96x96 = 9216 px) : {l_cnt:6d} 个 ({l_cnt / total * 100:.2f}%)")
+
+print("\n" + "=" * 65)
+print(f"扫描完成！全数据集目标汇总总计: {total_all_objects} 个目标")
+if missing_img_count > 0:
+    print(f"注意: 有 {missing_img_count} 个 TXT 标签未能找到对应的物理图片")
+print("=" * 65)
